@@ -1,13 +1,12 @@
 import 'package:flutter/material.dart';
 import 'request.dart';
-import 'status.dart';
-import 'transaction.dart';
 import 'sign_in.dart';
 
-void main() => runApp(MaterialApp(home: DashboardPage()));
+void main() => runApp(MaterialApp(home: DashboardPage(userId: 1)));
 
 class DashboardPage extends StatefulWidget {
-  const DashboardPage({super.key});
+  final int userId;
+  const DashboardPage({required this.userId, super.key});
 
   @override
   _DashboardPageState createState() => _DashboardPageState();
@@ -24,8 +23,6 @@ class _DashboardPageState extends State<DashboardPage> {
     _pages = [
       HomePage(serviceRequirements: serviceRequirements),
       RequestPage(),
-      StatusPage(),
-      TransactionPage(requestData: {},),
     ];
   }
 
@@ -133,11 +130,30 @@ class _DashboardPageState extends State<DashboardPage> {
           ),
           IconButton(
             icon: Icon(Icons.logout, color: Colors.white),
-            onPressed: () {
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(builder: (context) => SignInPage()),
+            onPressed: () async {
+              final shouldLogout = await showDialog<bool>(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: Text('Confirm Logout'),
+                  content: Text('Do you want to log out?'),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(false),
+                      child: Text('Cancel'),
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(true),
+                      child: Text('Yes'),
+                    ),
+                  ],
+                ),
               );
+              if (shouldLogout == true) {
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(builder: (context) => SignInPage()),
+                );
+              }
             },
           ),
         ],
@@ -158,12 +174,10 @@ class HomePage extends StatelessWidget {
       children: [
         Text(
           'Welcome to DocuEase',
-          style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.blue[900]),
+          style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: const Color.fromARGB(255, 13, 71, 161)),
         ),
         SizedBox(height: 20),
         _buildNavigationCard(context, 'Request Certificates', 'Apply for certificates, transcripts, and other official documents', Icons.description, RequestPage()),
-        _buildNavigationCard(context, 'Application Status', 'Monitor the status of your ongoing document requests', Icons.info_outline, StatusPage()),
-        _buildNavigationCard(context, 'Transaction', 'See your partial receipt', Icons.receipt_long, TransactionPage(requestData: {},)),
         SizedBox(height: 30),
         Text('Other Services', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.blue[800])),
         SizedBox(height: 10),
@@ -174,7 +188,7 @@ class HomePage extends StatelessWidget {
                 tilePadding: EdgeInsets.symmetric(horizontal: 16),
                 title: Text(entry.key, style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
                 children: entry.value
-                    .map((req) => ListTile(title: Text('• $req', style: TextStyle(fontSize: 14))))
+                    .map((req) => ListTile(title: Text('• $req', style: TextStyle(fontSize: 14)) ))
                     .toList(),
               ),
             )),

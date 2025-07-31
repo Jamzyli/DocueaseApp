@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'package:intl/intl.dart'; // For date formatting
-import 'package:image_picker/image_picker.dart'; // For image picking
-import 'dart:io'; // For File class
+import 'package:intl/intl.dart';
+import 'package:image_picker/image_picker.dart';
+import 'dart:io';
+import 'package:permission_handler/permission_handler.dart'; // Import permission_handler
 
 class RequestPage extends StatefulWidget {
   const RequestPage({Key? key}) : super(key: key);
@@ -13,16 +14,13 @@ class RequestPage extends StatefulWidget {
 }
 
 class _RequestPageState extends State<RequestPage> {
-  // Ensure this URL is correct and accessible from your device/emulator
   final String apiUrl = "http://192.168.137.1/data_docuease/request_handler.php";
-
   final _formKey = GlobalKey<FormState>();
-
   final fullNameController = TextEditingController();
   final addressController = TextEditingController();
   final contactNumberController = TextEditingController();
   final emailController = TextEditingController();
-  String _selectedCertificateType = "Birth Certificate"; // Default value
+  String _selectedCertificateType = "Birth Certificate";
 
   final dateOfBirthController = TextEditingController();
   final placeOfBirthController = TextEditingController();
@@ -31,7 +29,7 @@ class _RequestPageState extends State<RequestPage> {
   final dateOfDeathController = TextEditingController();
   final placeOfDeathController = TextEditingController();
 
-  File? _selectedImage; // Variable to store the picked image file
+  File? _selectedImage;
 
   @override
   void dispose() {
@@ -48,7 +46,6 @@ class _RequestPageState extends State<RequestPage> {
     super.dispose();
   }
 
-  // Function to clear certificate-specific controllers when type changes
   void _clearCertificateSpecificFields() {
     dateOfBirthController.clear();
     placeOfBirthController.clear();
@@ -58,16 +55,78 @@ class _RequestPageState extends State<RequestPage> {
     placeOfDeathController.clear();
   }
 
-  // Function to pick an image from gallery or camera
   Future<void> _pickImage() async {
-    final ImagePicker picker = ImagePicker();
-    final XFile? image = await picker.pickImage(source: ImageSource.gallery); // Or ImageSource.camera
-
-    if (image != null) {
-      setState(() {
-        _selectedImage = File(image.path);
-      });
+    // Request permission before picking image
+    var status = await Permission.photos.status;
+    if (status.isDenied) {
+      status = await Permission.photos.request();
     }
+
+    if (status.isGranted) {
+      final ImagePicker picker = ImagePicker();
+      final XFile? image = await picker.pickImage(source: ImageSource.gallery);
+
+      if (image != null) {
+        setState(() {
+          _selectedImage = File(image.path);
+        });
+      }
+    } else if (status.isPermanentlyDenied) {
+      // The user has permanently denied access, guide them to settings
+      _showPermissionDeniedDialog();
+    } else if (status.isRestricted) {
+      // iOS specific: The user cannot grant permission due to parental controls etc.
+      _showPermissionRestrictedDialog();
+    }
+  }
+
+  void _showPermissionDeniedDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text("Gallery Access Denied"),
+          content: const Text(
+              "Access to your photo gallery was permanently denied. Please enable it in your device settings to upload an ID."),
+          actions: <Widget>[
+            TextButton(
+              child: const Text("Cancel"),
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+            ),
+            TextButton(
+              child: const Text("Open Settings"),
+              onPressed: () {
+                Navigator.of(context).pop();
+                openAppSettings(); // Opens the app settings
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showPermissionRestrictedDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text("Gallery Access Restricted"),
+          content: const Text(
+              "Access to your photo gallery is restricted. This might be due to parental controls or other system settings."),
+          actions: <Widget>[
+            TextButton(
+              child: const Text("OK"),
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+            ),
+          ],
+        );
+      },
+    );
   }
 
   Future<void> _selectDate(BuildContext context, TextEditingController controller) async {
@@ -75,18 +134,18 @@ class _RequestPageState extends State<RequestPage> {
       context: context,
       initialDate: DateTime.now(),
       firstDate: DateTime(1900),
-      lastDate: DateTime.now().add(const Duration(days: 365)), // Allow future dates for some cases
+      lastDate: DateTime.now().add(const Duration(days: 365)),
       builder: (context, child) {
         return Theme(
           data: ThemeData.light().copyWith(
             colorScheme: ColorScheme.light(
-              primary: Colors.blue.shade800, // Header background color
-              onPrimary: Colors.white, // Header text color
-              onSurface: Colors.black, // Body text color
+              primary: Colors.blue.shade800,
+              onPrimary: Colors.white,
+              onSurface: Colors.black,
             ),
             textButtonTheme: TextButtonThemeData(
               style: TextButton.styleFrom(
-                foregroundColor: Colors.blue.shade800, // Button text color
+                foregroundColor: Colors.blue.shade800,
               ),
             ),
           ),
@@ -103,10 +162,9 @@ class _RequestPageState extends State<RequestPage> {
 
   void submitRequest() async {
     if (!_formKey.currentState!.validate()) {
-      return; // Stop if form is not valid
+      return;
     }
 
-    // Check if an image is selected
     if (_selectedImage == null) {
       showDialog(
         context: context,
@@ -124,7 +182,6 @@ class _RequestPageState extends State<RequestPage> {
       return;
     }
 
-    // Convert image to Base64 string
     String? base64Image;
     try {
       List<int> imageBytes = await _selectedImage!.readAsBytes();
@@ -147,16 +204,14 @@ class _RequestPageState extends State<RequestPage> {
       return;
     }
 
-    // Prepare data based on selected certificate type
     Map<String, dynamic> requestBody = {
       "certificate_type": _selectedCertificateType,
       "full_name": fullNameController.text,
       "address": addressController.text,
       "contact_number": contactNumberController.text,
       "email": emailController.text,
-      "valid_id_base64": base64Image, // Send Base64 encoded image
-      "file_extension": _selectedImage!.path.split('.').last, // Send file extension
-      // Initialize all specific fields to null, then populate if relevant
+      "valid_id_base64": base64Image,
+      "file_extension": _selectedImage!.path.split('.').last,
       "date_of_birth": null,
       "place_of_birth": null,
       "date_of_marriage": null,
@@ -189,20 +244,33 @@ class _RequestPageState extends State<RequestPage> {
 
       final data = jsonDecode(response.body);
 
-      showDialog(
+showDialog(
         context: context,
         builder: (context) => AlertDialog(
           title: Text(data['success'] ? 'Success' : 'Error'),
-          content: Text(data['message']),
+          content: data['success']
+              ? Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(data['message']),
+                    const SizedBox(height: 10),
+                    const Text(
+                      "Please check the progress on our website to see the status of your request. You can claim it within 1 week after completing the request.",
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                )
+              : Text(data['message']),
           actions: [
             TextButton(
               onPressed: () {
                 Navigator.pop(context);
                 if (data['success']) {
-                  _formKey.currentState?.reset(); // Clear form on success
+                  _formKey.currentState?.reset();
                   _clearCertificateSpecificFields();
                   setState(() {
-                    _selectedImage = null; // Clear selected image
+                    _selectedImage = null;
                   });
                 }
               },
@@ -236,7 +304,7 @@ class _RequestPageState extends State<RequestPage> {
           children: [
             TextFormField(
               controller: dateOfBirthController,
-              readOnly: true, // Make it read-only so date picker is used
+              readOnly: true,
               onTap: () => _selectDate(context, dateOfBirthController),
               decoration: _inputDecoration("Date of Birth (YYYY-MM-DD)", Icons.calendar_today),
               validator: (value) => value!.isEmpty ? 'Please enter date of birth' : null,
@@ -313,197 +381,200 @@ class _RequestPageState extends State<RequestPage> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text(
-          "Request Certificate",
-          style: TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        centerTitle: true,
-        iconTheme: const IconThemeData(
-          color: Colors.white,
-        ),
-        backgroundColor: Colors.blue.shade800,
-        elevation: 0, // Remove shadow
+Widget build(BuildContext context) {
+  return Scaffold(
+    backgroundColor: Colors.white,
+    appBar: AppBar(
+      title: const Text(
+        "Certificate Request Form",
+        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20, color: Colors.white),
       ),
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Colors.blue.shade800, Colors.blue.shade400],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
-        ),
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(20),
-            child: Card(
-              elevation: 8,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-              margin: const EdgeInsets.symmetric(horizontal: 10),
-              child: Padding(
-                padding: const EdgeInsets.all(25),
-                child: Form(
-                  key: _formKey,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Text(
-                        "Submit Your Request",
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.blue.shade800,
-                        ),
-                      ),
-                      const SizedBox(height: 25),
-                      DropdownButtonFormField<String>(
-                        value: _selectedCertificateType,
-                        decoration: _inputDecoration("Certificate Type", Icons.description),
-                        items: const [
-                          "Birth Certificate",
-                          "Marriage Certificate",
-                          "Death Certificate",
-                        ].map((type) => DropdownMenuItem(value: type, child: Text(type))).toList(),
-                        onChanged: (val) {
-                          setState(() {
-                            _selectedCertificateType = val!;
-                            _clearCertificateSpecificFields(); // Clear fields on type change
-                          });
-                        },
-                        validator: (value) => value == null ? 'Please select a certificate type' : null,
-                      ),
-                      const SizedBox(height: 15),
-                      TextFormField(
-                        controller: fullNameController,
-                        decoration: _inputDecoration("Full Name", Icons.person),
-                        validator: (value) => value!.isEmpty ? 'Please enter full name' : null,
-                      ),
-                      const SizedBox(height: 15),
-                      TextFormField(
-                        controller: addressController,
-                        decoration: _inputDecoration("Address", Icons.home),
-                        validator: (value) => value!.isEmpty ? 'Please enter address' : null,
-                      ),
-                      const SizedBox(height: 15),
-                      TextFormField(
-                        controller: contactNumberController,
-                        decoration: _inputDecoration("Contact Number", Icons.phone),
-                        keyboardType: TextInputType.phone,
-                        validator: (value) => value!.isEmpty ? 'Please enter contact number' : null,
-                      ),
-                      const SizedBox(height: 15),
-                      TextFormField(
-                        controller: emailController,
-                        decoration: _inputDecoration("Email", Icons.email),
-                        keyboardType: TextInputType.emailAddress,
-                        validator: (value) {
-                          if (value!.isEmpty) {
-                            return 'Please enter email';
-                          }
-                          if (!RegExp(r'^[^@]+@[^@]+\.[^@]+').hasMatch(value)) {
-                            return 'Please enter a valid email';
-                          }
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 15),
-                      _buildCertificateFields(), // Dynamically build fields
-                      const SizedBox(height: 25),
-                      // Valid ID Upload Section
-                      Container(
-                        decoration: BoxDecoration(
-                          color: Colors.blue.shade50,
+      backgroundColor: Colors.blue[900],
+      elevation: 0,
+      iconTheme: const IconThemeData(color: Colors.white),
+    ),
+    body: SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Form(
+        key: _formKey,
+        child: Column(
+          children: [
+            // Section 1: Request Details
+            _sectionCard(
+              title: "Request Details",
+              subtitle: "Select the type of certificate you are requesting.",
+              child: DropdownButtonFormField<String>(
+                value: _selectedCertificateType,
+                decoration: _inputDecoration("Certificate Type", Icons.description),
+                items: const [
+                  "Birth Certificate",
+                  "Marriage Certificate",
+                  "Death Certificate",
+                ].map((type) => DropdownMenuItem(value: type, child: Text(type, style: TextStyle(color: Colors.black)))).toList(),
+                onChanged: (val) {
+                  setState(() {
+                    _selectedCertificateType = val!;
+                    _clearCertificateSpecificFields();
+                  });
+                },
+                validator: (value) => value == null ? 'Please select a certificate type' : null,
+              ),
+            ),
+
+            const SizedBox(height: 20),
+
+            // Section 2: Personal Information
+            _sectionCard(
+              title: "Personal Information",
+              subtitle: "Provide your complete personal details.",
+              child: Column(
+                children: [
+                  _textField(fullNameController, "Full Name", Icons.person, "Please enter full name"),
+                  const SizedBox(height: 12),
+                  _textField(addressController, "Address", Icons.home, "Please enter address"),
+                  const SizedBox(height: 12),
+                  _textField(contactNumberController, "Contact Number", Icons.phone, "Please enter contact number", type: TextInputType.phone),
+                  const SizedBox(height: 12),
+                  _textField(emailController, "Email Address", Icons.email, "Please enter a valid email", type: TextInputType.emailAddress, isEmail: true),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 20),
+
+            // Section 3: Certificate-specific details
+            _sectionCard(
+              title: "Certificate Information",
+              subtitle: "Fill in details specific to your certificate type.",
+              child: _buildCertificateFields(),
+            ),
+
+            const SizedBox(height: 20),
+
+            // Section 4: Upload ID
+            _sectionCard(
+              title: "Identification",
+              subtitle: "Upload a valid government-issued ID.",
+              child: Column(
+                children: [
+                  _selectedImage == null
+                      ? InkWell(
+                          onTap: _pickImage,
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: Colors.blue.shade300, width: 1.0),
-                        ),
-                        padding: const EdgeInsets.all(15),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              "Upload Valid ID",
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.blue.shade800,
-                              ),
+                          child: Container(
+                            padding: const EdgeInsets.all(20),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              border: Border.all(color: Colors.blue, width: 1.5),
+                              borderRadius: BorderRadius.circular(12),
                             ),
-                            const SizedBox(height: 10),
-                            Center(
-                              child: _selectedImage == null
-                                  ? TextButton.icon(
-                                      onPressed: _pickImage,
-                                      icon: Icon(Icons.upload_file, color: Colors.blue.shade600),
-                                      label: Text(
-                                        "Select Image",
-                                        style: TextStyle(color: Colors.blue.shade800),
-                                      ),
-                                      style: TextButton.styleFrom(
-                                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                                        shape: RoundedRectangleBorder(
-                                          borderRadius: BorderRadius.circular(10),
-                                          side: BorderSide(color: Colors.blue.shade600),
-                                        ),
-                                      ),
-                                    )
-                                  : Column(
-                                      children: [
-                                        Image.file(
-                                          _selectedImage!,
-                                          height: 150,
-                                          fit: BoxFit.cover,
-                                        ),
-                                        const SizedBox(height: 10),
-                                        Text(
-                                          _selectedImage!.path.split('/').last,
-                                          textAlign: TextAlign.center,
-                                          style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
-                                        ),
-                                        TextButton.icon(
-                                          onPressed: _pickImage, // Allow re-picking
-                                          icon: Icon(Icons.change_circle, color: Colors.blue.shade600),
-                                          label: Text(
-                                            "Change Image",
-                                            style: TextStyle(color: Colors.blue.shade800),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
+                            child: Column(
+                              children: const [
+                                Icon(Icons.upload_file, color: Colors.blue, size: 40),
+                                SizedBox(height: 8),
+                                Text("Tap to Upload", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                                SizedBox(height: 4),
+                                Text("PNG, JPG up to 5MB", style: TextStyle(color: Colors.black, fontSize: 12)),
+                              ],
+                            ),
+                          ),
+                        )
+                      : Column(
+                          children: [
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: Image.file(_selectedImage!, height: 150, fit: BoxFit.cover),
+                            ),
+                            const SizedBox(height: 8),
+                            TextButton.icon(
+                              onPressed: _pickImage,
+                              icon: const Icon(Icons.change_circle, color: Colors.blue),
+                              label: const Text("Change Image", style: TextStyle(color: Colors.blue)),
                             ),
                           ],
                         ),
-                      ),
-                      const SizedBox(height: 25),
-                      ElevatedButton(
-                        onPressed: submitRequest,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blue.shade800, // Button background color
-                          foregroundColor: Colors.white, // Button text color
-                          padding: const EdgeInsets.symmetric(vertical: 15),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          elevation: 5,
-                        ),                                                                                                          
-                        child: const Text(
-                          "Submit Request",
-                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+                ],
               ),
             ),
-          ),
+
+            const SizedBox(height: 30),
+
+            // Submit button
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: submitRequest,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                child: const Text("Submit Request", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+              ),
+            ),
+          ],
         ),
       ),
+    ),
+  );
+}
+
+/// Section Card
+Widget _sectionCard({required String title, required String subtitle, required Widget child}) {
+  return Card(
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+    elevation: 2,
+    color: Colors.white,
+    child: Padding(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black)),
+          const SizedBox(height: 4),
+          Text(subtitle, style: const TextStyle(fontSize: 13, color: Colors.black)),
+          const Divider(height: 20, thickness: 1, color: Colors.blue),
+          child,
+        ],
+      ),
+    ),
+  );
+}
+
+/// Text Field
+  Widget _textField(TextEditingController controller, String label, IconData icon, String errorMsg,
+      {TextInputType type = TextInputType.text, bool isEmail = false}) {
+    return TextFormField(
+      controller: controller,
+      decoration: _inputDecoration(label, icon),
+      keyboardType: type,
+      style: const TextStyle(color: Colors.black),
+      validator: (value) {
+        if (value == null || value.isEmpty) return errorMsg;
+        if (isEmail && !RegExp(r'^[^@]+@[^@]+\.[^@]+').hasMatch(value)) return "Please enter a valid email";
+        if (label == "Contact Number") {
+          if (!RegExp(r'^\d{11}$').hasMatch(value)) {
+            return "Contact number must be exactly 11 digits";
+          }
+        }
+        return null;
+      },
     );
   }
+
+/// Input Decoration
+InputDecoration inputDecoration(String label, IconData icon) {
+  return InputDecoration(
+    labelText: label,
+    labelStyle: const TextStyle(color: Colors.black),
+    prefixIcon: Icon(icon, color: const Color.from(alpha: 1, red: 0.086, green: 0.522, blue: 0.875)),
+    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.blue)),
+    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.blue)),
+    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.blue, width: 2)),
+    contentPadding: const EdgeInsets.symmetric(vertical: 15, horizontal: 20),
+    fillColor: Colors.white,
+    filled: true,
+  );
 }
+}
+

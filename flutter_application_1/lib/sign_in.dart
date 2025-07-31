@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
 import 'dashboard.dart';
 import 'sign_up.dart';
 
@@ -11,13 +14,43 @@ class SignInPage extends StatefulWidget {
   State<SignInPage> createState() => _SignInPageState();
 }
 
-
 class _SignInPageState extends State<SignInPage> {
   final TextEditingController emailController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
   bool _rememberMe = false;
+  bool _obscurePassword = true;
 
-  final String apiUrl = "http://192.168.137.1/data_docuease/sign_in.php"; 
+  final String apiUrl = "http://192.168.137.1/data_docuease/sign_in.php";
+
+  @override
+  void initState() {
+    super.initState();
+    _loadRememberedEmail();
+  }
+
+  Future<void> _loadRememberedEmail() async {
+    final prefs = await SharedPreferences.getInstance();
+    final rememberedEmail = prefs.getString('remembered_email') ?? '';
+    final rememberMe = prefs.getBool('remember_me') ?? false;
+
+    if (rememberMe && rememberedEmail.isNotEmpty) {
+      setState(() {
+        _rememberMe = true;
+        emailController.text = rememberedEmail;
+      });
+    }
+  }
+
+  Future<void> _saveRememberedEmail(String email) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (_rememberMe) {
+      await prefs.setString('remembered_email', email);
+      await prefs.setBool('remember_me', true);
+    } else {
+      await prefs.remove('remembered_email');
+      await prefs.setBool('remember_me', false);
+    }
+  }
 
   void _signInUser() async {
     final email = emailController.text.trim();
@@ -25,6 +58,11 @@ class _SignInPageState extends State<SignInPage> {
 
     if (email.isEmpty || password.isEmpty) {
       _showErrorDialog("Please enter both email and password.");
+      return;
+    }
+
+    if (!_rememberMe) {
+      _showErrorDialog("You must check 'Remember me' to proceed.");
       return;
     }
 
@@ -38,17 +76,22 @@ class _SignInPageState extends State<SignInPage> {
         }),
       );
 
+      print('Response status: \${response.statusCode}');
+      print('Response body: \${response.body}');
+
       final data = jsonDecode(response.body);
 
       if (data['status'] == 'success') {
+        await _saveRememberedEmail(email);
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (_) => DashboardPage()),
+          MaterialPageRoute(builder: (_) => DashboardPage(userId:0,)),
         );
       } else {
         _showErrorDialog(data['message'] ?? "Invalid credentials.");
       }
     } catch (e) {
+      print('Error during sign in: \$e');
       _showErrorDialog("Could not connect to server.");
     }
   }
@@ -67,6 +110,19 @@ class _SignInPageState extends State<SignInPage> {
         ],
       ),
     );
+  }
+
+  void _launchForgotPassword() async {
+    final Uri url = Uri.parse('http://192.168.137.1/docuease/forgot_pass.php');
+
+    try {
+      final launched = await launchUrl(url, mode: LaunchMode.platformDefault);
+      if (!launched) {
+        _showErrorDialog('Could not open forgot password page.');
+      }
+    } catch (e) {
+      _showErrorDialog('Launch failed: $e');
+    }
   }
 
   @override
@@ -103,12 +159,21 @@ class _SignInPageState extends State<SignInPage> {
               const SizedBox(height: 15),
               TextField(
                 controller: passwordController,
-                obscureText: true,
-                decoration: const InputDecoration(
+                obscureText: _obscurePassword,
+                decoration: InputDecoration(
                   labelText: 'Password',
-                  prefixIcon: Icon(Icons.lock),
-                  border: OutlineInputBorder(),
-                  suffixIcon: Icon(Icons.visibility_off),
+                  prefixIcon: const Icon(Icons.lock),
+                  border: const OutlineInputBorder(),
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                    ),
+                    onPressed: () {
+                      setState(() {
+                        _obscurePassword = !_obscurePassword;
+                      });
+                    },
+                  ),
                 ),
               ),
               Row(
@@ -123,7 +188,10 @@ class _SignInPageState extends State<SignInPage> {
                   ),
                   const Text('Remember me'),
                   const Spacer(),
-                  TextButton(onPressed: () {}, child: const Text('Forgot password?')),
+                  TextButton(
+                    onPressed: _launchForgotPassword,
+                    child: const Text('Forgot password?'),
+                  ),
                 ],
               ),
               ElevatedButton(
